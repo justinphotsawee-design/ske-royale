@@ -46,7 +46,7 @@ def main():
                 action = title_screen.handle_event(event)
                 if action == "play":
                     if len(player_deck) == 8:
-                        if title_screen.stats_window:
+                        if title_screen.stats_process and title_screen.stats_process.is_alive():
                             title_screen._toggle_stats()
                         stage = Stage(player_deck)
                         current = "battle"

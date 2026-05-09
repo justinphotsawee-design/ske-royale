@@ -4,12 +4,150 @@ import os
 
 import tkinter as tk
 from tkinter import ttk
-import threading
+import multiprocessing
 from constants import *
 # For embedding matplotlib charts in Tkinter
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+def _run_stats_window(stats, filepath):
+    """Runs the Tkinter stats window in a separate process.
+    Must be a module-level function so multiprocessing can pickle it.
+    This gives Tkinter its own main thread, which is required on macOS."""
+    window = tk.Tk()
+    window.title("Game Statistics")
+    notebook = ttk.Notebook(window)
+
+    # Tab 1: Card Frequency (Bar Chart)
+    tab1 = ttk.Frame(notebook)
+    notebook.add(tab1, text="Card Frequency")
+    if stats and 'card_freq' in stats and stats['card_freq']:
+        fig1, ax1 = plt.subplots(figsize=(4, 2.5), dpi=100)
+        items = sorted(stats['card_freq'].items(), key=lambda x: -x[1])[:10]
+        names = [n for n, _ in items]
+        counts = [c for _, c in items]
+        ax1.bar(names, counts, color='skyblue')
+        ax1.set_ylabel('Plays')
+        ax1.set_title('Top 10 Card Frequency')
+        ax1.tick_params(axis='x', rotation=30)
+        fig1.tight_layout()
+        canvas1 = FigureCanvasTkAgg(fig1, master=tab1)
+        canvas1.draw()
+        canvas1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    else:
+        tk.Label(tab1, text="No card data.").pack()
+
+    # Tab 2: Archetype (Pie Chart)
+    tab2 = ttk.Frame(notebook)
+    notebook.add(tab2, text="Archetype")
+    if stats:
+        melee = stats.get('melee', 0)
+        range_ = stats.get('range', 0)
+        total = melee + range_
+        if total > 0:
+            fig2, ax2 = plt.subplots(figsize=(3.5, 2.5), dpi=100)
+            ax2.pie([melee, range_], labels=["Melee", "Range"], autopct='%1.1f%%', colors=['#ff9999', '#66b3ff'])
+            ax2.set_title('Archetype Distribution')
+            fig2.tight_layout()
+            canvas2 = FigureCanvasTkAgg(fig2, master=tab2)
+            canvas2.draw()
+            canvas2.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        else:
+            tk.Label(tab2, text="No archetype data.").pack()
+    else:
+        tk.Label(tab2, text="No archetype data.").pack()
+
+    # Tab 3: Tower Damage (Line Graph)
+    tab3 = ttk.Frame(notebook)
+    notebook.add(tab3, text="Tower Damage")
+    if stats:
+        tower_dmg_per_game = []
+        if os.path.exists(filepath):
+            with open(filepath, newline="") as f:
+                reader = csv.DictReader(f)
+                dmg = 0
+                for row in reader:
+                    if row["event"] == "tower_damage":
+                        try:
+                            dmg += int(float(row["damage"]))
+                        except Exception:
+                            pass
+                    if row["event"] == "game_over":
+                        tower_dmg_per_game.append(dmg)
+                        dmg = 0
+        if tower_dmg_per_game:
+            fig3, ax3 = plt.subplots(figsize=(4, 2.5), dpi=100)
+            ax3.plot(range(1, len(tower_dmg_per_game) + 1), tower_dmg_per_game, marker='o', color='orange')
+            ax3.set_xlabel('Game #')
+            ax3.set_ylabel('Tower Damage')
+            ax3.set_title('Tower Damage per Game')
+            fig3.tight_layout()
+            canvas3 = FigureCanvasTkAgg(fig3, master=tab3)
+            canvas3.draw()
+            canvas3.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        else:
+            tk.Label(tab3, text=f"Total damage taken: {stats.get('tower_dmg', 0)}").pack()
+    else:
+        tk.Label(tab3, text="No tower damage data.").pack()
+
+    # Tab 4: Mana Expenditure (Line Graph)
+    tab4 = ttk.Frame(notebook)
+    notebook.add(tab4, text="Mana Expenditure")
+    if stats:
+        mana_per_game = []
+        if os.path.exists(filepath):
+            with open(filepath, newline="") as f:
+                reader = csv.DictReader(f)
+                mana = 0
+                for row in reader:
+                    if row["event"] == "card_played":
+                        try:
+                            mana += float(row["mana_cost"])
+                        except Exception:
+                            pass
+                    if row["event"] == "game_over":
+                        mana_per_game.append(mana)
+                        mana = 0
+        if mana_per_game:
+            fig4, ax4 = plt.subplots(figsize=(4, 2.5), dpi=100)
+            ax4.plot(range(1, len(mana_per_game) + 1), mana_per_game, marker='o', color='green')
+            ax4.set_xlabel('Game #')
+            ax4.set_ylabel('Mana Spent')
+            ax4.set_title('Mana Spent per Game')
+            fig4.tight_layout()
+            canvas4 = FigureCanvasTkAgg(fig4, master=tab4)
+            canvas4.draw()
+            canvas4.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        else:
+            tk.Label(tab4, text=f"Total mana spent: {int(stats.get('total_mana', 0))}").pack()
+    else:
+        tk.Label(tab4, text="No mana data.").pack()
+
+    # Tab 5: Positional Placement (Heatmap)
+    tab5 = ttk.Frame(notebook)
+    notebook.add(tab5, text="Positional Placement")
+    if stats and 'grid_heat' in stats and stats['grid_heat']:
+        fig5, ax5 = plt.subplots(figsize=(2.5, 2.5), dpi=100)
+        grid = np.array(stats['grid_heat']).reshape((3, 3))
+        im = ax5.imshow(grid, cmap='hot', interpolation='nearest')
+        for i in range(3):
+            for j in range(3):
+                ax5.text(j, i, str(grid[i, j]), ha='center', va='center', color='white', fontsize=10)
+        ax5.set_xticks([])
+        ax5.set_yticks([])
+        ax5.set_title('Grid Placement Heatmap')
+        fig5.colorbar(im, ax=ax5, fraction=0.046, pad=0.04)
+        fig5.tight_layout()
+        canvas5 = FigureCanvasTkAgg(fig5, master=tab5)
+        canvas5.draw()
+        canvas5.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    else:
+        tk.Label(tab5, text="No grid placement data.").pack()
+
+    notebook.pack(fill=tk.BOTH, expand=True)
+    window.mainloop()
 
 
 class TitleScreen:
@@ -28,8 +166,7 @@ class TitleScreen:
         self.btn_w = 240
         self.btn_h = 60
         self.hovered = None
-        self.stats_window = None
-        self.stats_thread = None
+        self.stats_process = None
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEMOTION:
@@ -85,158 +222,17 @@ class TitleScreen:
         return None
 
     def _toggle_stats(self):
-        if self.stats_window:
-            try:
-                self.stats_window.quit()
-                self.stats_window.destroy()
-            except:
-                pass
-            self.stats_window = None
-            if self.stats_thread and self.stats_thread.is_alive():
-                self.stats_thread.join(timeout=1)
-            self.stats_thread = None
+        if self.stats_process and self.stats_process.is_alive():
+            self.stats_process.terminate()
+            self.stats_process.join(timeout=1)
+            self.stats_process = None
         else:
-            self.stats_thread = threading.Thread(target=self._create_stats_window)
-            self.stats_thread.start()
-
-    def _create_stats_window(self):
-        self.stats_window = tk.Tk()
-        self.stats_window.title("Game Statistics")
-        notebook = ttk.Notebook(self.stats_window)
-        stats = self._load_stats()
-
-        # Tab 1: Card Frequency (Bar Chart)
-        tab1 = ttk.Frame(notebook)
-        notebook.add(tab1, text="Card Frequency")
-        if stats and 'card_freq' in stats and stats['card_freq']:
-            fig1, ax1 = plt.subplots(figsize=(4, 2.5), dpi=100)
-            items = sorted(stats['card_freq'].items(), key=lambda x: -x[1])[:10]
-            names = [n for n, _ in items]
-            counts = [c for _, c in items]
-            ax1.bar(names, counts, color='skyblue')
-            ax1.set_ylabel('Plays')
-            ax1.set_title('Top 10 Card Frequency')
-            ax1.tick_params(axis='x', rotation=30)
-            fig1.tight_layout()
-            canvas1 = FigureCanvasTkAgg(fig1, master=tab1)
-            canvas1.draw()
-            canvas1.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        else:
-            tk.Label(tab1, text="No card data.").pack()
-
-        # Tab 2: Archetype (Pie Chart)
-        tab2 = ttk.Frame(notebook)
-        notebook.add(tab2, text="Archetype")
-        if stats:
-            melee = stats.get('melee', 0)
-            range_ = stats.get('range', 0)
-            total = melee + range_
-            if total > 0:
-                fig2, ax2 = plt.subplots(figsize=(3.5, 2.5), dpi=100)
-                ax2.pie([melee, range_], labels=["Melee", "Range"], autopct='%1.1f%%', colors=['#ff9999','#66b3ff'])
-                ax2.set_title('Archetype Distribution')
-                fig2.tight_layout()
-                canvas2 = FigureCanvasTkAgg(fig2, master=tab2)
-                canvas2.draw()
-                canvas2.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-            else:
-                tk.Label(tab2, text="No archetype data.").pack()
-        else:
-            tk.Label(tab2, text="No archetype data.").pack()
-
-        # Tab 3: Tower Damage (Line Graph)
-        tab3 = ttk.Frame(notebook)
-        notebook.add(tab3, text="Tower Damage")
-        if stats:
-            # For line graph, show tower damage per game if available
+            stats = self._load_stats()
             filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_stats.csv")
-            tower_dmg_per_game = []
-            if os.path.exists(filepath):
-                with open(filepath, newline="") as f:
-                    reader = csv.DictReader(f)
-                    dmg = 0
-                    for row in reader:
-                        if row["event"] == "tower_damage":
-                            try:
-                                dmg += int(float(row["damage"]))
-                            except Exception:
-                                pass
-                        if row["event"] == "game_over":
-                            tower_dmg_per_game.append(dmg)
-                            dmg = 0
-            if tower_dmg_per_game:
-                fig3, ax3 = plt.subplots(figsize=(4, 2.5), dpi=100)
-                ax3.plot(range(1, len(tower_dmg_per_game)+1), tower_dmg_per_game, marker='o', color='orange')
-                ax3.set_xlabel('Game #')
-                ax3.set_ylabel('Tower Damage')
-                ax3.set_title('Tower Damage per Game')
-                fig3.tight_layout()
-                canvas3 = FigureCanvasTkAgg(fig3, master=tab3)
-                canvas3.draw()
-                canvas3.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-            else:
-                tk.Label(tab3, text=f"Total damage taken: {stats.get('tower_dmg', 0)}").pack()
-        else:
-            tk.Label(tab3, text="No tower damage data.").pack()
-
-        # Tab 4: Mana Expenditure (Line Graph)
-        tab4 = ttk.Frame(notebook)
-        notebook.add(tab4, text="Mana Expenditure")
-        if stats:
-            # Show mana spent per game if available
-            filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_stats.csv")
-            mana_per_game = []
-            if os.path.exists(filepath):
-                with open(filepath, newline="") as f:
-                    reader = csv.DictReader(f)
-                    mana = 0
-                    for row in reader:
-                        if row["event"] == "card_played":
-                            try:
-                                mana += float(row["mana_cost"])
-                            except Exception:
-                                pass
-                        if row["event"] == "game_over":
-                            mana_per_game.append(mana)
-                            mana = 0
-            if mana_per_game:
-                fig4, ax4 = plt.subplots(figsize=(4, 2.5), dpi=100)
-                ax4.plot(range(1, len(mana_per_game)+1), mana_per_game, marker='o', color='green')
-                ax4.set_xlabel('Game #')
-                ax4.set_ylabel('Mana Spent')
-                ax4.set_title('Mana Spent per Game')
-                fig4.tight_layout()
-                canvas4 = FigureCanvasTkAgg(fig4, master=tab4)
-                canvas4.draw()
-                canvas4.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-            else:
-                tk.Label(tab4, text=f"Total mana spent: {int(stats.get('total_mana', 0))}").pack()
-        else:
-            tk.Label(tab4, text="No mana data.").pack()
-
-        # Tab 5: Positional Placement (Heatmap)
-        tab5 = ttk.Frame(notebook)
-        notebook.add(tab5, text="Positional Placement")
-        if stats and 'grid_heat' in stats and stats['grid_heat']:
-            fig5, ax5 = plt.subplots(figsize=(2.5, 2.5), dpi=100)
-            grid = np.array(stats['grid_heat']).reshape((3, 3))
-            im = ax5.imshow(grid, cmap='hot', interpolation='nearest')
-            for i in range(3):
-                for j in range(3):
-                    ax5.text(j, i, str(grid[i, j]), ha='center', va='center', color='white', fontsize=10)
-            ax5.set_xticks([])
-            ax5.set_yticks([])
-            ax5.set_title('Grid Placement Heatmap')
-            fig5.colorbar(im, ax=ax5, fraction=0.046, pad=0.04)
-            fig5.tight_layout()
-            canvas5 = FigureCanvasTkAgg(fig5, master=tab5)
-            canvas5.draw()
-            canvas5.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        else:
-            tk.Label(tab5, text="No grid placement data.").pack()
-
-        notebook.pack(fill=tk.BOTH, expand=True)
-        self.stats_window.mainloop()
+            self.stats_process = multiprocessing.Process(
+                target=_run_stats_window, args=(stats, filepath), daemon=True
+            )
+            self.stats_process.start()
 
     def _load_stats(self):
         filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_stats.csv")
